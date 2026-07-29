@@ -153,4 +153,8 @@ dev-smart-assistant-frontend/
 
 ## 九、GitHub
 
-本仓库用于存放前端源码。克隆后按「怎么启动」三步即可运行。
+仓库地址：[https://github.com/Mtyleming/dev-smart-assistant-frontend](https://github.com/Mtyleming/dev-smart-assistant-frontend)
+
+克隆后按「怎么启动」三步即可运行。
+
+> 说明：若本机 `git push` 访问 GitHub 不稳定，可继续用 `gh` 登录状态同步代码；仓库本身已创建并完成首次上传。
