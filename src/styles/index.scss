@@ -1,0 +1,30 @@
+/* 全局样式与主题变量 */
+:root {
+  --app-bg: #f5f7fa;
+  --app-sidebar-bg: #1f2d3d;
+  --app-sidebar-text: #c0c4cc;
+  --app-sidebar-active: #409eff;
+  --app-header-height: 56px;
+  --app-content-padding: 20px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--app-bg);
+  color: #303133;
+}
+
+#nprogress .bar {
+  background: #409eff !important;
+}
+
+.page-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
