@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { logoutApi } from '@/api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +24,13 @@ const menuItems = computed(() => {
 
 async function handleLogout() {
   await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
+  try {
+    await logoutApi()
+  } catch {
+    // 即使后端退出失败，也清除本地登录态
+  }
   userStore.logout()
+  ElMessage.success('已退出登录')
   router.push('/login')
 }
 </script>

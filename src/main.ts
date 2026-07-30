@@ -8,6 +8,7 @@ import 'nprogress/nprogress.css'
 
 import App from './App.vue'
 import router from './router'
+import { useUserStore } from './stores/user'
 import '@/styles/index.scss'
 
 const app = createApp(App)
@@ -17,8 +18,15 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
 
-app.use(createPinia())
+const pinia = createPinia()
+app.use(pinia)
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
+
+// 有 Token 时拉取用户信息，校验登录态是否有效
+const userStore = useUserStore()
+if (userStore.token) {
+  userStore.fetchUserInfo()
+}
 
 app.mount('#app')
