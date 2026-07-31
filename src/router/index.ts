@@ -4,10 +4,17 @@ import { useUserStore } from '@/stores/user'
 
 NProgress.configure({ showSpinner: false })
 
+/** 普通用户可访问的业务页面（超级管理员暂时隐藏） */
+const userAppPaths = ['/chat', '/knowledge', '/teams']
+
+function defaultHomePath(isSuperAdmin: boolean) {
+  return isSuperAdmin ? '/admin' : '/chat'
+}
+
 /**
  * 路由表：登录、对话、知识库、管理后台四个核心页面
  * 需要登录的页面设置 meta.requiresAuth
- * 仅管理员可访问的页面设置 meta.requiresAdmin
+ * 仅超级管理员可访问的页面设置 meta.requiresSuperAdmin
  */
 const router = createRouter({
   history: createWebHistory(),
@@ -31,17 +38,23 @@ const router = createRouter({
       meta: { title: '知识库管理', requiresAuth: true },
     },
     {
+      path: '/teams',
+      name: 'Teams',
+      component: () => import('@/views/TeamView.vue'),
+      meta: { title: '团队管理', requiresAuth: true },
+    },
+    {
       path: '/admin',
       name: 'Admin',
       component: () => import('@/views/AdminView.vue'),
-      meta: { title: '管理后台', requiresAuth: true, requiresAdmin: true },
+      meta: { title: '管理后台', requiresAuth: true, requiresSuperAdmin: true },
     },
-    { path: '/', redirect: '/chat' },
-    { path: '/:pathMatch(.*)*', redirect: '/chat' },
+    { path: '/', redirect: () => defaultHomePath(useUserStore().isSuperAdmin) },
+    { path: '/:pathMatch(.*)*', redirect: () => defaultHomePath(useUserStore().isSuperAdmin) },
   ],
 })
 
-// 全局前置守卫：进度条 + 登录态/管理员校验
+// 全局前置守卫：进度条 + 登录态/超级管理员校验
 router.beforeEach((to, _from, next) => {
   NProgress.start()
   document.title = `${(to.meta.title as string) || '开发智能助手'} - 开发智能助手`
@@ -53,14 +66,20 @@ router.beforeEach((to, _from, next) => {
     return
   }
 
-  if (to.meta.requiresAdmin && !userStore.isAdmin) {
+  if (to.meta.requiresSuperAdmin && !userStore.isSuperAdmin) {
     next('/chat')
     return
   }
 
-  // 已登录访问登录页时，直接进入对话页
+  // 超级管理员暂时只能访问管理后台
+  if (userStore.isSuperAdmin && userAppPaths.includes(to.path)) {
+    next('/admin')
+    return
+  }
+
+  // 已登录访问登录页时，进入对应首页
   if (to.path === '/login' && userStore.isLoggedIn) {
-    next('/chat')
+    next(defaultHomePath(userStore.isSuperAdmin))
     return
   }
 

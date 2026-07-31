@@ -1,142 +1,165 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { fetchUsersApi, updateUserApi, type AdminUser } from '@/api/admin'
+import {
+  getOrganizationTreeApi,
+  updateUserStatusApi,
+  type AdminOrganizationTree,
+  type AdminUserNode,
+} from '@/api/admin'
+import { teamRoleLabel } from '@/api/team'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
-const users = ref<AdminUser[]>([])
-const editVisible = ref(false)
-const formRef = ref<FormInstance>()
-const form = reactive({
-  id: 0,
-  username: '',
-  role: 'user',
-  teamId: 1,
-  status: 'active' as AdminUser['status'],
-})
+const togglingId = ref<number | null>(null)
+const orgTree = ref<AdminOrganizationTree>({ teams: [], unassigned_users: [] })
 
-const rules: FormRules = {
-  username: [{ required: true, message: '用户名不能为空', trigger: 'blur' }],
-  role: [{ required: true, message: '请选择角色', trigger: 'change' }],
-}
-
-const demoUsers: AdminUser[] = [
-  { id: 1, username: 'admin', role: 'admin', teamId: 1, status: 'active' },
-  { id: 2, username: 'alice', role: 'user', teamId: 1, status: 'active' },
-  { id: 3, username: 'bob', role: 'user', teamId: 2, status: 'disabled' },
-]
-
-async function loadUsers() {
+async function loadOrgTree() {
   loading.value = true
   try {
-    users.value = await fetchUsersApi()
-  } catch {
-    users.value = [...demoUsers]
-    ElMessage.warning('用户接口不可用，已加载演示数据')
+    orgTree.value = await getOrganizationTreeApi()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载组织树失败')
   } finally {
     loading.value = false
   }
 }
 
-function openEdit(row: AdminUser) {
-  form.id = row.id
-  form.username = row.username
-  form.role = row.role
-  form.teamId = row.teamId
-  form.status = row.status
-  editVisible.value = true
-}
+async function handleToggleStatus(user: AdminUserNode, isActive: boolean) {
+  if (user.id === userStore.userInfo?.id && !isActive) {
+    ElMessage.warning('不能停用自己的账号')
+    return
+  }
 
-async function saveUser() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
+  if (!isActive) {
+    try {
+      await ElMessageBox.confirm(`确定停用用户「${user.username}」吗？停用后该用户将立即无法登录。`, '停用用户', {
+        type: 'warning',
+        confirmButtonText: '停用',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return
+    }
+  }
 
+  togglingId.value = user.id
   try {
-    await updateUserApi(form.id, {
-      role: form.role,
-      teamId: form.teamId,
-      status: form.status,
-    })
-  } catch {
-    // 本地演示更新
+    await updateUserStatusApi(user.id, isActive)
+    user.is_active = isActive
+    ElMessage.success(isActive ? '已启用用户' : '已停用用户')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '操作失败')
+  } finally {
+    togglingId.value = null
   }
-
-  const target = users.value.find((u) => u.id === form.id)
-  if (target) {
-    target.role = form.role
-    target.teamId = form.teamId
-    target.status = form.status
-  }
-
-  ElMessage.success('保存成功')
-  editVisible.value = false
 }
 
-onMounted(loadUsers)
+function onStatusChange(user: AdminUserNode, val: string | number | boolean) {
+  handleToggleStatus(user, Boolean(val))
+}
+
+onMounted(loadOrgTree)
 </script>
 
 <template>
   <AppLayout>
     <div class="admin-page page-card">
       <div class="toolbar">
-        <h3>用户管理</h3>
-        <el-button @click="loadUsers">刷新</el-button>
+        <div>
+          <h3>用户管理</h3>
+          <p class="subtitle">查看组织树，启用或停用用户账号</p>
+        </div>
+        <el-button @click="loadOrgTree">刷新</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="users">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="username" label="用户名" min-width="140" />
-        <el-table-column prop="role" label="角色" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.role === 'admin' ? 'warning' : 'info'" size="small">
-              {{ row.role === 'admin' ? '管理员' : '普通用户' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="teamId" label="团队 ID" width="100" />
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'active' ? '启用' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEdit(row)">编辑</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+      <div v-loading="loading" class="org-tree">
+        <el-empty v-if="!loading && orgTree.teams.length === 0 && orgTree.unassigned_users.length === 0" description="暂无用户数据" />
 
-    <el-dialog v-model="editVisible" title="编辑用户" width="460px">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" disabled />
-        </el-form-item>
-        <el-form-item label="角色" prop="role">
-          <el-select v-model="form.role" style="width: 100%">
-            <el-option label="普通用户" value="user" />
-            <el-option label="管理员" value="admin" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="团队 ID">
-          <el-input-number v-model="form.teamId" :min="1" />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-radio-group v-model="form.status">
-            <el-radio value="active">启用</el-radio>
-            <el-radio value="disabled">停用</el-radio>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveUser">保存</el-button>
-      </template>
-    </el-dialog>
+        <section v-for="team in orgTree.teams" :key="team.id" class="team-section">
+          <div class="team-header">
+            <h4>{{ team.name }}</h4>
+            <span class="team-meta">
+              ID {{ team.id }} · {{ team.member_count }} 人
+              <template v-if="team.description"> · {{ team.description }}</template>
+            </span>
+          </div>
+          <el-table :data="team.members" size="small" stripe>
+            <el-table-column prop="username" label="用户名" min-width="120" />
+            <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+            <el-table-column label="团队角色" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" type="info">{{ teamRoleLabel(row.role) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="超级管理员" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_super_admin" size="small" type="warning">是</el-tag>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
+                  {{ row.is_active ? '启用' : '停用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="启停用" width="100" align="center">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.is_active"
+                  :loading="togglingId === row.id"
+                  :disabled="row.id === userStore.userInfo?.id"
+                  @change="onStatusChange(row, $event)"
+                />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section v-if="orgTree.unassigned_users.length > 0" class="team-section">
+          <div class="team-header">
+            <h4>未加入团队</h4>
+            <span class="team-meta">{{ orgTree.unassigned_users.length }} 人</span>
+          </div>
+          <el-table :data="orgTree.unassigned_users" size="small" stripe>
+            <el-table-column prop="username" label="用户名" min-width="120" />
+            <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+            <el-table-column label="团队角色" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" type="info">{{ teamRoleLabel(row.role) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="超级管理员" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_super_admin" size="small" type="warning">是</el-tag>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
+                  {{ row.is_active ? '启用' : '停用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="启停用" width="100" align="center">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.is_active"
+                  :loading="togglingId === row.id"
+                  :disabled="row.id === userStore.userInfo?.id"
+                  @change="onStatusChange(row, $event)"
+                />
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+      </div>
+    </div>
   </AppLayout>
 </template>
 
@@ -144,11 +167,47 @@ onMounted(loadUsers)
 .toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
 
   h3 {
-    margin: 0;
+    margin: 0 0 4px;
   }
+
+  .subtitle {
+    margin: 0;
+    color: #909399;
+    font-size: 13px;
+  }
+}
+
+.org-tree {
+  min-height: 200px;
+}
+
+.team-section {
+  margin-bottom: 24px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.team-header {
+  margin-bottom: 10px;
+
+  h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+  }
+
+  .team-meta {
+    color: #909399;
+    font-size: 13px;
+  }
+}
+
+.muted {
+  color: #c0c4cc;
 }
 </style>

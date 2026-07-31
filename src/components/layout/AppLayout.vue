@@ -1,25 +1,40 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logoutApi } from '@/api/auth'
+import { teamRoleLabel } from '@/api/team'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const appStore = useAppStore()
+const switchingTeam = ref(false)
+
+const currentTeamName = computed(() => {
+  const team = userStore.currentTeam
+  if (team) return team.name
+  const id = userStore.currentTeamId
+  return id ? `团队 ${id}` : '未加入团队'
+})
 
 const menuItems = computed(() => {
-  const items = [
+  if (userStore.isSuperAdmin) {
+    return [{ path: '/admin', title: '管理后台', icon: 'Setting' }]
+  }
+  return [
     { path: '/chat', title: '对话助手', icon: 'ChatDotRound' },
     { path: '/knowledge', title: '知识库管理', icon: 'FolderOpened' },
+    { path: '/teams', title: '团队管理', icon: 'UserFilled' },
   ]
-  if (userStore.isAdmin) {
-    items.push({ path: '/admin', title: '管理后台', icon: 'Setting' })
+})
+
+onMounted(() => {
+  if (userStore.isLoggedIn && !userStore.isSuperAdmin) {
+    userStore.fetchMyTeams()
   }
-  return items
 })
 
 async function handleLogout() {
@@ -32,6 +47,22 @@ async function handleLogout() {
   userStore.logout()
   ElMessage.success('已退出登录')
   router.push('/login')
+}
+
+async function handleSwitchTeam(teamId: number) {
+  if (teamId === userStore.currentTeamId || switchingTeam.value) return
+  switchingTeam.value = true
+  try {
+    await userStore.switchTeam(teamId)
+    ElMessage.success('已切换团队')
+    if (route.path !== '/teams') {
+      router.push('/teams')
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '切换团队失败')
+  } finally {
+    switchingTeam.value = false
+  }
 }
 </script>
 
@@ -69,8 +100,34 @@ async function handleLogout() {
           <span class="page-title">{{ route.meta.title }}</span>
         </div>
         <div class="header-right">
+          <el-dropdown v-if="!userStore.isSuperAdmin" trigger="click" @command="handleSwitchTeam">
+            <span class="team-switcher">
+              <el-icon><UserFilled /></el-icon>
+              {{ currentTeamName }}
+              <el-icon class="arrow"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="team in userStore.myTeams"
+                  :key="team.id"
+                  :command="team.id"
+                  :disabled="team.isCurrent"
+                >
+                  <span class="team-item">
+                    <span>{{ team.name }}（ID: {{ team.id }}）</span>
+                    <el-tag size="small" type="info">{{ teamRoleLabel(team.role) }}</el-tag>
+                    <el-tag v-if="team.isCurrent" size="small" type="success">当前</el-tag>
+                  </span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="userStore.myTeams.length === 0" disabled>
+                  暂无已加入团队
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <span class="username">{{ userStore.userInfo?.username || '用户' }}</span>
-          <el-tag v-if="userStore.isAdmin" size="small" type="warning">管理员</el-tag>
+          <el-tag v-if="userStore.isSuperAdmin" size="small" type="warning">超级管理员</el-tag>
           <el-button type="danger" link @click="handleLogout">退出</el-button>
         </div>
       </header>
@@ -146,6 +203,25 @@ async function handleLogout() {
 
 .username {
   color: #606266;
+}
+
+.team-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #409eff;
+  font-size: 13px;
+
+  .arrow {
+    font-size: 12px;
+  }
+}
+
+.team-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .content {

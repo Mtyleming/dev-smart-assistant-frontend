@@ -85,3 +85,12 @@ export function logoutApi() {
 export function getMeApi() {
   return http.get<unknown, MeData>('/auth/me')
 }
+
+export interface SwitchTeamPayload {
+  team_id: number
+}
+
+/** 切换当前团队（重签双 Token） */
+export function switchTeamApi(data: SwitchTeamPayload) {
+  return http.post<SwitchTeamPayload, AuthData>('/auth/switch-team', data)
+}
