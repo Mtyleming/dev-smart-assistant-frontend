@@ -163,9 +163,10 @@ export function updateConversationTitleApi(conversationId: number, title: string
 }
 
 /** 获取对话消息列表 */
-export async function listMessagesApi(conversationId: number) {
-  const raw = await http.get<unknown, ConversationMessageRaw[]>(
-    `/conversations/${conversationId}/messages`,
-  )
-  return raw.map(mapMessage)
+export async function listMessagesApi(conversationId: number, page = 1, pageSize = 100) {
+  const raw = await http.post<
+    { conversationId: number; page: number; pageSize: number },
+    { items: ConversationMessageRaw[]; total: number; page: number }
+  >('/messages/getMessageList', { conversationId, page, pageSize })
+  return raw.items.map(mapMessage)
 }

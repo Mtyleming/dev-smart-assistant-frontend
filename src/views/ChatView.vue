@@ -4,7 +4,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import MessageBubble from '@/components/MessageBubble.vue'
 import { useChatStore } from '@/stores/chat'
-import { streamChatApi } from '@/api/chat'
+import {
+  resolveConversationIdFromChatResponse,
+  sendChatMessageApi,
+  type MessageContentType,
+} from '@/api/message'
 import {
   CONVERSATION_MODE_OPTIONS,
   conversationModeLabel,
@@ -26,7 +30,6 @@ const creating = ref(false)
 const titleVisible = ref(false)
 const titleInput = ref('')
 const editingId = ref<number | null>(null)
-let abortController: AbortController | null = null
 
 const canSend = computed(
   () => inputText.value.trim().length > 0 && !chatStore.streaming && !messagesLoading.value,
@@ -86,6 +89,18 @@ async function selectConversation(id: number) {
   await loadMessages(id)
 }
 
+function applyConversationSelection(id: number) {
+  chatStore.setConversationId(id)
+  const item = chatStore.conversations.find((c) => c.id === id)
+  if (item) {
+    chatStore.setMode(item.mode)
+  }
+}
+
+function contentTypeByMode(mode: ConversationMode): MessageContentType {
+  return mode === 'code' ? 'code' : 'text'
+}
+
 async function handleCreate(mode: ConversationMode) {
   creating.value = true
   try {
@@ -136,26 +151,13 @@ async function saveTitle() {
   }
 }
 
-async function ensureConversation() {
-  if (chatStore.conversationId) return chatStore.conversationId
-  const created = await createConversationApi(chatStore.mode)
-  chatStore.setConversationId(created.id)
-  await loadConversations()
-  return created.id
-}
-
 async function sendQuestion() {
   if (!canSend.value) return
 
   const content = inputText.value.trim()
   inputText.value = ''
-
-  try {
-    await ensureConversation()
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '创建对话失败')
-    return
-  }
+  const isNewConversation = chatStore.conversationId == null
+  const activeConversationId = chatStore.conversationId
 
   chatStore.addMessage({
     id: createId('user'),
@@ -172,51 +174,41 @@ async function sendQuestion() {
   chatStore.streaming = true
   await scrollToBottom()
 
-  abortController = new AbortController()
-
   try {
-    let assembled = ''
-    await streamChatApi(
-      {
-        conversationId: chatStore.conversationId ?? undefined,
-        content,
-        mode: chatStore.mode,
-      },
-      (chunk) => {
-        assembled += chunk
-        chatStore.updateLastAssistantContent(assembled)
-        scrollToBottom()
-      },
-      abortController.signal,
-    )
+    const result = await sendChatMessageApi({
+      content,
+      content_type: contentTypeByMode(chatStore.mode),
+      conversation_id: activeConversationId ?? undefined,
+    })
+
+    const userMessage = chatStore.messages[chatStore.messages.length - 2]
+    const assistantMessage = chatStore.messages[chatStore.messages.length - 1]
+    if (userMessage) {
+      userMessage.id = result.user_msg.id
+      userMessage.content = result.user_msg.content
+    }
+    if (assistantMessage) {
+      assistantMessage.id = result.assistant_msg.id
+      assistantMessage.content = result.assistant_msg.content
+    }
+
     await loadConversations()
+
+    if (isNewConversation) {
+      const newConversationId =
+        resolveConversationIdFromChatResponse(result) ?? chatStore.conversations[0]?.id ?? null
+      if (newConversationId != null) {
+        applyConversationSelection(newConversationId)
+      }
+    }
   } catch (error) {
-    const demo = [
-      '（演示回复）流式对话接口暂未连通，消息已记录在本地。',
-      '',
-      '你刚才问的是：',
-      '',
-      `> ${content}`,
-      '',
-      '示例代码：',
-      '',
-      '```ts',
-      'console.log("Hello, Smart Assistant")',
-      '```',
-    ].join('\n')
-    chatStore.updateLastAssistantContent(demo)
-    ElMessage.warning('流式接口不可用，已展示本地演示回复')
-    console.warn('[ChatView] stream failed:', error)
+    chatStore.messages.splice(-2, 2)
+    ElMessage.error(error instanceof Error ? error.message : '发送消息失败')
+    console.warn('[ChatView] send message failed:', error)
   } finally {
     chatStore.streaming = false
-    abortController = null
     await scrollToBottom()
   }
-}
-
-function stopStreaming() {
-  abortController?.abort()
-  chatStore.streaming = false
 }
 
 function formatTime(value: string) {
@@ -308,7 +300,6 @@ onMounted(loadConversations)
             @keydown.enter.exact.prevent="sendQuestion"
           />
           <div class="composer-actions">
-            <el-button v-if="chatStore.streaming" @click="stopStreaming">停止</el-button>
             <el-button type="primary" :disabled="!canSend" :loading="chatStore.streaming" @click="sendQuestion">
               发送
             </el-button>
