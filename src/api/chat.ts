@@ -1,10 +1,11 @@
 import http from '@/utils/http'
 import { useUserStore } from '@/stores/user'
+import type { ConversationMode } from '@/api/conversation'
 
 export interface SendMessagePayload {
-  conversationId?: string
+  conversationId?: number
   content: string
-  mode: 'knowledge' | 'general'
+  mode: ConversationMode
 }
 
 /** 非流式发送消息（普通问答） */

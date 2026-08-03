@@ -33,6 +33,12 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value)
   const isSuperAdmin = computed(() => userInfo.value?.id === SUPER_ADMIN_USER_ID)
+  const currentTeamRole = computed(() => {
+    const current = myTeams.value.find((t) => t.isCurrent)
+    if (current) return current.role
+    return myTeams.value.find((t) => t.id === userInfo.value?.teamId)?.role
+  })
+  const isTeamAdmin = computed(() => currentTeamRole.value === 'admin')
   const currentTeamId = computed(() => userInfo.value?.teamId)
   const currentTeam = computed(() =>
     myTeams.value.find((t) => t.isCurrent) ??
@@ -103,6 +109,8 @@ export const useUserStore = defineStore('user', () => {
     currentTeamId,
     isLoggedIn,
     isSuperAdmin,
+    isTeamAdmin,
+    currentTeamRole,
     setTokens,
     setLogin,
     logout,

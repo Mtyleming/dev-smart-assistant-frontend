@@ -26,6 +26,16 @@ import {
   type TeamMember,
   type TeamMemberRole,
 } from '@/api/team'
+import {
+  CONVERSATION_MODE_OPTIONS,
+  conversationModeLabel,
+  listConversationsApi,
+  listMessagesApi,
+  type ConversationListItem,
+  type ConversationMessage,
+  type ConversationMode,
+} from '@/api/conversation'
+import MessageBubble from '@/components/MessageBubble.vue'
 
 const userStore = useUserStore()
 const activeTab = ref('overview')
@@ -33,6 +43,8 @@ const activeTab = ref('overview')
 const loading = ref(false)
 const membersLoading = ref(false)
 const requestsLoading = ref(false)
+const teamConvLoading = ref(false)
+const teamConvMessagesLoading = ref(false)
 const switching = ref(false)
 const moduleStatus = ref('')
 
@@ -40,6 +52,18 @@ const team = ref<TeamDetail | null>(null)
 const members = ref<TeamMember[]>([])
 const joinRequests = ref<JoinRequest[]>([])
 const latestInvite = ref<InviteCode | null>(null)
+const teamConversations = ref<ConversationListItem[]>([])
+const teamConvTotal = ref(0)
+const teamConvPage = ref(1)
+const teamConvMessages = ref<ConversationMessage[]>([])
+const viewConvVisible = ref(false)
+const viewingConv = ref<ConversationListItem | null>(null)
+
+const teamConvFilters = reactive({
+  title: '',
+  mode: '' as ConversationMode | '',
+  username: '',
+})
 
 const createVisible = ref(false)
 const editVisible = ref(false)
@@ -70,6 +94,7 @@ const joinRules: FormRules = {
 const currentTeamId = computed(() => userStore.currentTeamId)
 
 const isTeamAdmin = computed(() => {
+  if (userStore.isTeamAdmin) return true
   const uid = userStore.userInfo?.id
   if (!uid) return false
   const self = members.value.find((m) => m.id === uid)
@@ -133,6 +158,54 @@ async function loadJoinRequests() {
   } finally {
     requestsLoading.value = false
   }
+}
+
+async function loadTeamConversations() {
+  if (!currentTeamId.value || !isTeamAdmin.value) return
+  teamConvLoading.value = true
+  try {
+    const result = await listConversationsApi({
+      page: teamConvPage.value,
+      page_size: 20,
+      scope: 'team',
+      title: teamConvFilters.title.trim() || undefined,
+      mode: teamConvFilters.mode || undefined,
+      username: teamConvFilters.username.trim() || undefined,
+    })
+    teamConversations.value = result.items
+    teamConvTotal.value = result.total
+    teamConvPage.value = result.page
+  } catch (err) {
+    teamConversations.value = []
+    teamConvTotal.value = 0
+    ElMessage.error(err instanceof Error ? err.message : '加载团队对话失败')
+  } finally {
+    teamConvLoading.value = false
+  }
+}
+
+async function openViewConversation(item: ConversationListItem) {
+  viewingConv.value = item
+  viewConvVisible.value = true
+  teamConvMessagesLoading.value = true
+  teamConvMessages.value = []
+  try {
+    teamConvMessages.value = await listMessagesApi(item.id)
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载对话内容失败')
+  } finally {
+    teamConvMessagesLoading.value = false
+  }
+}
+
+function searchTeamConversations() {
+  teamConvPage.value = 1
+  loadTeamConversations()
+}
+
+function handleTeamConvPageChange(page: number) {
+  teamConvPage.value = page
+  loadTeamConversations()
 }
 
 function openCreate() {
@@ -322,6 +395,12 @@ function formatTime(value: string) {
 
 watch(currentTeamId, () => loadTeam())
 
+watch(activeTab, (tab) => {
+  if (tab === 'conversations' && isTeamAdmin.value) {
+    loadTeamConversations()
+  }
+})
+
 onMounted(async () => {
   await loadModuleStatus()
   await userStore.fetchMyTeams()
@@ -466,6 +545,70 @@ onMounted(async () => {
           </div>
         </el-tab-pane>
 
+        <!-- 团队对话（管理员只读） -->
+        <el-tab-pane v-if="isTeamAdmin" label="团队对话" name="conversations">
+          <div class="page-card">
+            <div class="toolbar">
+              <div>
+                <h3>团队对话列表</h3>
+                <p class="hint">仅可查看本团队全部成员的对话，不可编辑或删除</p>
+              </div>
+              <el-button @click="loadTeamConversations">刷新</el-button>
+            </div>
+            <el-form :inline="true" class="filter-form" @submit.prevent="searchTeamConversations">
+              <el-form-item label="标题">
+                <el-input v-model="teamConvFilters.title" placeholder="模糊搜索" clearable />
+              </el-form-item>
+              <el-form-item label="模式">
+                <el-select v-model="teamConvFilters.mode" placeholder="全部" clearable style="width: 140px">
+                  <el-option
+                    v-for="opt in CONVERSATION_MODE_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="创建人">
+                <el-input v-model="teamConvFilters.username" placeholder="用户名" clearable />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="searchTeamConversations">查询</el-button>
+              </el-form-item>
+            </el-form>
+            <el-table v-loading="teamConvLoading" :data="teamConversations">
+              <el-table-column prop="id" label="ID" width="80" />
+              <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="username" label="创建人" width="120" />
+              <el-table-column prop="mode" label="模式" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" type="info">{{ conversationModeLabel(row.mode) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="updatedAt" label="更新时间" min-width="170">
+                <template #default="{ row }">{{ formatTime(row.updatedAt) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button type="primary" link size="small" @click="openViewConversation(row)">
+                    查看
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!teamConvLoading && teamConversations.length === 0" description="暂无对话" />
+            <div v-if="teamConvTotal > 20" class="pagination">
+              <el-pagination
+                layout="prev, pager, next"
+                :total="teamConvTotal"
+                :page-size="20"
+                :current-page="teamConvPage"
+                @current-change="handleTeamConvPageChange"
+              />
+            </div>
+          </div>
+        </el-tab-pane>
+
         <!-- 入团审批 -->
         <el-tab-pane v-if="isTeamAdmin" label="入团审批" name="requests">
           <div class="page-card">
@@ -496,6 +639,28 @@ onMounted(async () => {
         </el-tab-pane>
       </el-tabs>
     </div>
+
+    <!-- 查看团队对话（只读） -->
+    <el-dialog
+      v-model="viewConvVisible"
+      :title="viewingConv ? `查看对话：${viewingConv.title}` : '查看对话'"
+      width="720px"
+      class="view-conv-dialog"
+    >
+      <div v-if="viewingConv" class="view-conv-meta">
+        <span>创建人：{{ viewingConv.username || '—' }}</span>
+        <span>模式：{{ conversationModeLabel(viewingConv.mode) }}</span>
+        <span>更新时间：{{ formatTime(viewingConv.updatedAt) }}</span>
+      </div>
+      <div v-loading="teamConvMessagesLoading" class="view-conv-messages">
+        <el-empty v-if="!teamConvMessagesLoading && teamConvMessages.length === 0" description="暂无消息" />
+        <MessageBubble
+          v-for="msg in teamConvMessages"
+          :key="msg.id"
+          :message="{ id: msg.id, role: msg.role as 'user' | 'assistant' | 'system', content: msg.content }"
+        />
+      </div>
+    </el-dialog>
 
     <!-- 创建团队 -->
     <el-dialog v-model="createVisible" title="创建团队" width="480px">
@@ -640,6 +805,31 @@ onMounted(async () => {
   p {
     margin: 4px 0;
   }
+}
+
+.filter-form {
+  margin-bottom: 16px;
+}
+
+.pagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.view-conv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.view-conv-messages {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px 4px;
 }
 
 .dialog-hint {
