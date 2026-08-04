@@ -1,122 +1,273 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { UploadRequestOptions } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { fetchKnowledgeListApi, createKnowledgeApi, deleteKnowledgeApi, type KnowledgeBase } from '@/api/knowledge'
+import {
+  pageKnowledgeApi,
+  createKnowledgeApi,
+  updateKnowledgeApi,
+  deleteKnowledgeApi,
+  getKnowledgeStatusApi,
+  type KnowledgeBase,
+} from '@/api/knowledge'
 
 const loading = ref(false)
 const knowledgeBases = ref<KnowledgeBase[]>([])
-const selectedRows = ref<KnowledgeBase[]>([])
-const createVisible = ref(false)
-const newName = ref('')
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const keyword = ref('')
+const moduleStatus = ref('')
 
-/** 演示数据：后端未就绪时用于页面展示 */
-const demoData: KnowledgeBase[] = [
-  { id: 1, name: '产品需求文档库', docCount: 12, updatedAt: '2026-07-28' },
-  { id: 2, name: '前端开发规范', docCount: 8, updatedAt: '2026-07-27' },
-  { id: 3, name: '接口设计说明', docCount: 21, updatedAt: '2026-07-26' },
-]
+const createVisible = ref(false)
+const editVisible = ref(false)
+const submitting = ref(false)
+
+const createFormRef = ref<FormInstance>()
+const editFormRef = ref<FormInstance>()
+
+const createForm = reactive({ name: '', description: '' })
+const editForm = reactive({ id: 0, name: '', description: '' })
+
+const nameRules: FormRules = {
+  name: [
+    { required: true, message: '请输入知识库名称', trigger: 'blur' },
+    { min: 1, max: 200, message: '名称长度 1-200 个字符', trigger: 'blur' },
+  ],
+}
+
+/** 把后端时间格式化成更易读的本地时间 */
+function formatTime(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function loadModuleStatus() {
+  try {
+    const status = await getKnowledgeStatusApi()
+    moduleStatus.value = typeof status.detail === 'string' ? status.detail : status.status
+  } catch {
+    moduleStatus.value = ''
+  }
+}
 
 async function loadList() {
   loading.value = true
   try {
-    knowledgeBases.value = await fetchKnowledgeListApi()
-  } catch {
-    knowledgeBases.value = [...demoData]
-    ElMessage.warning('知识库接口不可用，已加载演示数据')
+    const result = await pageKnowledgeApi({
+      page: page.value,
+      pageSize: pageSize.value,
+      keyword: keyword.value.trim() || null,
+    })
+    knowledgeBases.value = result.items
+    total.value = result.total
+    page.value = result.page
+  } catch (error) {
+    knowledgeBases.value = []
+    total.value = 0
+    ElMessage.error(error instanceof Error ? error.message : '加载知识库失败')
   } finally {
     loading.value = false
   }
 }
 
-function handleSelectionChange(rows: KnowledgeBase[]) {
-  selectedRows.value = rows
+function handleSearch() {
+  page.value = 1
+  loadList()
+}
+
+function handlePageChange(nextPage: number) {
+  page.value = nextPage
+  loadList()
+}
+
+function handleSizeChange(size: number) {
+  pageSize.value = size
+  page.value = 1
+  loadList()
+}
+
+function openCreate() {
+  createForm.name = ''
+  createForm.description = ''
+  createVisible.value = true
+}
+
+function openEdit(row: KnowledgeBase) {
+  editForm.id = row.id
+  editForm.name = row.name
+  editForm.description = row.description ?? ''
+  editVisible.value = true
 }
 
 async function handleCreate() {
-  if (!newName.value.trim()) {
-    ElMessage.warning('请输入知识库名称')
-    return
-  }
+  const valid = await createFormRef.value?.validate().catch(() => false)
+  if (!valid) return
 
+  submitting.value = true
   try {
-    await createKnowledgeApi(newName.value.trim())
-    ElMessage.success('创建成功')
-  } catch {
-    // 本地演示：直接插入列表
-    knowledgeBases.value.unshift({
-      id: Date.now(),
-      name: newName.value.trim(),
-      docCount: 0,
-      updatedAt: new Date().toISOString().slice(0, 10),
+    await createKnowledgeApi({
+      name: createForm.name.trim(),
+      description: createForm.description.trim() || null,
     })
-    ElMessage.success('已在本地演示中创建')
+    ElMessage.success('创建成功')
+    createVisible.value = false
+    page.value = 1
+    await loadList()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '创建失败')
+  } finally {
+    submitting.value = false
   }
+}
 
-  createVisible.value = false
-  newName.value = ''
+async function handleUpdate() {
+  const valid = await editFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  submitting.value = true
+  try {
+    await updateKnowledgeApi({
+      id: editForm.id,
+      name: editForm.name.trim(),
+      description: editForm.description.trim() || null,
+    })
+    ElMessage.success('更新成功')
+    editVisible.value = false
+    await loadList()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '更新失败')
+  } finally {
+    submitting.value = false
+  }
 }
 
 async function handleDelete(row: KnowledgeBase) {
-  await ElMessageBox.confirm(`确定删除知识库「${row.name}」吗？`, '提示', { type: 'warning' })
+  await ElMessageBox.confirm(`确定删除知识库「${row.name}」吗？删除后不可恢复。`, '提示', {
+    type: 'warning',
+  })
   try {
     await deleteKnowledgeApi(row.id)
-  } catch {
-    // 忽略后端错误，继续本地删除演示
+    ElMessage.success('已删除')
+    if (knowledgeBases.value.length === 1 && page.value > 1) {
+      page.value -= 1
+    }
+    await loadList()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
   }
-  knowledgeBases.value = knowledgeBases.value.filter((item) => item.id !== row.id)
-  ElMessage.success('已删除')
 }
 
-/** 自定义上传：后续对接真实上传接口 */
-async function customUpload(options: UploadRequestOptions) {
-  const file = options.file
-  ElMessage.success(`已选择文件：${file.name}（待对接上传接口）`)
-  options.onSuccess?.({} as never)
-}
-
-onMounted(loadList)
+onMounted(async () => {
+  await loadModuleStatus()
+  await loadList()
+})
 </script>
 
 <template>
   <AppLayout>
     <div class="knowledge-page page-card">
       <div class="toolbar">
-        <div>
-          <el-button type="primary" @click="createVisible = true">新建知识库</el-button>
-          <el-tag v-if="selectedRows.length" class="selected-tip" type="info">
-            已选中 {{ selectedRows.length }} 个知识库
-          </el-tag>
+        <div class="toolbar-left">
+          <el-button type="primary" @click="openCreate">新建知识库</el-button>
+          <el-tag v-if="moduleStatus" type="success" effect="plain">模块：{{ moduleStatus }}</el-tag>
         </div>
-        <el-upload :show-file-list="false" :http-request="customUpload" accept=".pdf,.doc,.docx,.md,.txt">
-          <el-button>上传文档</el-button>
-        </el-upload>
+        <div class="toolbar-right">
+          <el-input
+            v-model="keyword"
+            clearable
+            placeholder="按名称搜索"
+            style="width: 220px"
+            @keyup.enter="handleSearch"
+            @clear="handleSearch"
+          />
+          <el-button @click="handleSearch">搜索</el-button>
+        </div>
       </div>
 
-      <el-table
-        v-loading="loading"
-        :data="knowledgeBases"
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="48" />
+      <el-table v-loading="loading" :data="knowledgeBases" empty-text="暂无知识库，点击上方新建">
         <el-table-column prop="name" label="知识库名称" min-width="180" />
-        <el-table-column prop="docCount" label="文档数量" width="120" />
-        <el-table-column prop="updatedAt" label="更新时间" width="140" />
-        <el-table-column label="操作" width="160">
+        <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button type="primary" link size="small">管理文档</el-button>
+            {{ row.description || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.updatedAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="openEdit(row)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pager">
+        <el-pagination
+          background
+          layout="total, sizes, prev, pager, next"
+          :total="total"
+          :current-page="page"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
+        />
+      </div>
     </div>
 
-    <el-dialog v-model="createVisible" title="新建知识库" width="420px">
-      <el-input v-model="newName" placeholder="请输入知识库名称" maxlength="50" show-word-limit />
+    <el-dialog v-model="createVisible" title="新建知识库" width="480px" destroy-on-close>
+      <el-form ref="createFormRef" :model="createForm" :rules="nameRules" label-width="80px">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="createForm.name" maxlength="200" show-word-limit placeholder="请输入知识库名称" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="createForm.description"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="可选，简要说明用途"
+          />
+        </el-form-item>
+      </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleCreate">确定</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleCreate">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="editVisible" title="编辑知识库" width="480px" destroy-on-close>
+      <el-form ref="editFormRef" :model="editForm" :rules="nameRules" label-width="80px">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="editForm.name" maxlength="200" show-word-limit placeholder="请输入知识库名称" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="editForm.description"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="可选，留空则清空描述"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleUpdate">保存</el-button>
       </template>
     </el-dialog>
   </AppLayout>
@@ -129,9 +280,19 @@ onMounted(loadList)
   align-items: center;
   margin-bottom: 16px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-.selected-tip {
-  margin-left: 12px;
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

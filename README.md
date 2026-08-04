@@ -79,7 +79,7 @@ npm run preview
 |------|------|--------|
 | `/login` | 登录页 | 输入账号密码进入系统 |
 | `/chat` | 对话主界面 | 我的对话列表、创建/删除/改标题、提问与流式回答 |
-| `/knowledge` | 知识库管理 | 查看知识库列表、新建、删除、上传文档 |
+| `/knowledge` | 知识库管理 | 查看知识库列表、新建、编辑、删除、按名称搜索 |
 | `/admin` | 管理后台 | 仅超级管理员可进，用户组织树与启停用账号 |
 
 默认打开 `/` 会自动跳到 `/chat`。未登录访问受保护页面会跳回登录页。
@@ -140,13 +140,28 @@ dev-smart-assistant-frontend/
 
 代理配置在 `vite.config.ts` 的 `server.proxy` 中（已关闭代理超时，避免 SSE 被提前断开）。
 
+### 知识库（`/knowledge-bases/*`）
+
+需登录后携带 Bearer Token。当前后端已提供：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/knowledge-bases/status` | 模块探活 |
+| POST | `/knowledge-bases/page` | 分页列表（`page` / `pageSize` / `keyword`） |
+| POST | `/knowledge-bases/create` | 新建（`name` 必填，`description` 可选） |
+| POST | `/knowledge-bases/getById` | 详情（`id`） |
+| POST | `/knowledge-bases/update` | 更新（`id` + `name`/`description`） |
+| POST | `/knowledge-bases/delete` | 删除（`id`） |
+
+前端页面：`/knowledge`，接口封装在 `src/api/knowledge.ts`。文档上传接口后端尚未提供，页面暂未开放上传入口。
+
 ---
 
 ## 七、常见问题
 
 ### Q1：页面能开，但接口报错？
 
-正常。后端未启动时，登录、对话、知识库、管理页都会自动降级为演示数据，不影响你先看界面。
+请先确认后端已在 `http://localhost:8000` 启动，并用真实账号登录。知识库页会直接调用真实接口；失败时会提示错误信息，不再静默使用演示数据。
 
 ### Q2：为什么管理后台进不去？
 
@@ -158,11 +173,19 @@ dev-smart-assistant-frontend/
 
 ### Q4：怎么改后端地址？
 
+开发环境改 `vite.config.ts` 里 `server.proxy['/api'].target`；生产环境改 `.env.production` 的 `VITE_API_BASE_URL`。
+
+### Q5：知识库列表是空的？
+
+1. 确认已登录（未登录会 401）  
+2. 知识库按「当前团队」隔离，切换团队后列表会不同  
+3. 点击「新建知识库」创建一条后再刷新列表  
+
 ---
 
 ## 八、后续可改进
 
-- 知识库上传与文档解析状态完善  
+- 知识库文档上传、解析状态与「管理文档」页  
 - 对话流支持「停止生成」按钮（AbortController 已预留）  
 - 管理后台增加团队管理、权限细化  
 - 补充单元测试与 E2E 测试  
