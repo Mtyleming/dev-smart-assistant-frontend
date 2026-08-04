@@ -33,6 +33,7 @@ function extractErrorMessage(error: AxiosError<ApiResponse>) {
   if (status === 401) return '账号或密码错误'
   if (status === 404) return '账号不存在'
   if (status === 422) return '请求参数有误'
+  if (error.code === 'ECONNABORTED') return '请求超时，请稍后重试'
   return error.message || '网络请求失败'
 }
 

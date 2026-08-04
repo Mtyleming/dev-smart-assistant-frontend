@@ -1,4 +1,5 @@
 export {
+  streamChatMessageApi,
   sendChatMessageApi,
   getMessageListApi,
   resolveConversationIdFromChatResponse,
@@ -9,4 +10,5 @@ export {
   type MessageListRequest,
   type MessageListResult,
   type MessageListItem,
+  type StreamChatHandlers,
 } from '@/api/message'

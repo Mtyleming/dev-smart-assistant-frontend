@@ -6,7 +6,7 @@ import MessageBubble from '@/components/MessageBubble.vue'
 import { useChatStore } from '@/stores/chat'
 import {
   resolveConversationIdFromChatResponse,
-  sendChatMessageApi,
+  streamChatMessageApi,
   type MessageContentType,
 } from '@/api/message'
 import {
@@ -30,6 +30,8 @@ const creating = ref(false)
 const titleVisible = ref(false)
 const titleInput = ref('')
 const editingId = ref<number | null>(null)
+/** 用于中断当前 SSE 流式请求 */
+let abortController: AbortController | null = null
 
 const canSend = computed(
   () => inputText.value.trim().length > 0 && !chatStore.streaming && !messagesLoading.value,
@@ -158,6 +160,8 @@ async function sendQuestion() {
   inputText.value = ''
   const isNewConversation = chatStore.conversationId == null
   const activeConversationId = chatStore.conversationId
+  let receivedConversationId: number | null = null
+  let gotAnyDelta = false
 
   chatStore.addMessage({
     id: createId('user'),
@@ -172,14 +176,49 @@ async function sendQuestion() {
     content: '',
   })
   chatStore.streaming = true
+  abortController?.abort()
+  abortController = new AbortController()
   await scrollToBottom()
 
   try {
-    const result = await sendChatMessageApi({
-      content,
-      content_type: contentTypeByMode(chatStore.mode),
-      conversation_id: activeConversationId ?? undefined,
-    })
+    const result = await streamChatMessageApi(
+      {
+        content,
+        content_type: contentTypeByMode(chatStore.mode),
+        conversation_id: activeConversationId ?? undefined,
+      },
+      {
+        onConversation(conversationId) {
+          receivedConversationId = conversationId
+          if (isNewConversation && chatStore.conversationId == null) {
+            chatStore.setConversationId(conversationId)
+          }
+        },
+        onUserMsg(msg) {
+          const userMessage = chatStore.messages[chatStore.messages.length - 2]
+          if (userMessage) {
+            userMessage.id = msg.id
+            userMessage.content = msg.content
+          }
+        },
+        onDelta(chunk) {
+          gotAnyDelta = true
+          const assistantMessage = chatStore.messages[chatStore.messages.length - 1]
+          if (assistantMessage?.role === 'assistant') {
+            assistantMessage.content += chunk
+          }
+          void scrollToBottom()
+        },
+        onAssistantMsg(msg) {
+          const assistantMessage = chatStore.messages[chatStore.messages.length - 1]
+          if (assistantMessage) {
+            assistantMessage.id = msg.id
+            assistantMessage.content = msg.content
+          }
+        },
+      },
+      abortController.signal,
+    )
 
     const userMessage = chatStore.messages[chatStore.messages.length - 2]
     const assistantMessage = chatStore.messages[chatStore.messages.length - 1]
@@ -196,17 +235,27 @@ async function sendQuestion() {
 
     if (isNewConversation) {
       const newConversationId =
-        resolveConversationIdFromChatResponse(result) ?? chatStore.conversations[0]?.id ?? null
+        receivedConversationId ??
+        resolveConversationIdFromChatResponse(result) ??
+        chatStore.conversations[0]?.id ??
+        null
       if (newConversationId != null) {
         applyConversationSelection(newConversationId)
       }
     }
   } catch (error) {
-    chatStore.messages.splice(-2, 2)
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return
+    }
+    // 若尚未开始输出，回滚乐观消息；已有内容则保留并提示
+    if (!gotAnyDelta) {
+      chatStore.messages.splice(-2, 2)
+    }
     ElMessage.error(error instanceof Error ? error.message : '发送消息失败')
     console.warn('[ChatView] send message failed:', error)
   } finally {
     chatStore.streaming = false
+    abortController = null
     await scrollToBottom()
   }
 }

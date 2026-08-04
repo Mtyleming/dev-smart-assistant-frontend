@@ -31,6 +31,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // 流式对话 SSE 可能较长，避免代理提前断开
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },

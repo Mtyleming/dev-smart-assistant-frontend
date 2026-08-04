@@ -115,13 +115,30 @@ dev-smart-assistant-frontend/
 - 业务接口统一前缀：`/api/v1`  
 - 开发环境通过 Vite 代理转发到：`http://localhost:8000`  
 - 普通请求走 `src/utils/http.ts`（Axios）  
-- 流式对话走 `src/api/chat.ts` 的 `streamChatApi`（fetch）
+- 流式对话走 `src/api/message.ts` 的 `streamChatMessageApi`（`fetch` + SSE）
+
+### 对话 SSE（`POST /messages/chat`）
+
+请求体与原先一致：`content` 必填，可选 `content_type`、`conversation_id`（首次可不传）。
+
+响应为 `text/event-stream`，常见事件顺序：
+
+| 事件 | data 含义 |
+|------|-----------|
+| `conversation` | `{"conversation_id": number}` 会话 ID（新建时会推） |
+| `user_msg` | 用户消息完整对象（含 id） |
+| `delta` | `{"content": "..."}` 助手增量文本，可多次 |
+| `assistant_msg` | 助手消息完整对象（含 id 与全文） |
+| `done` | `null`，流结束 |
+| `error` | `{"code": number, "message": string}` 业务错误 |
+
+前端会边收 `delta` 边渲染气泡；结束后用 `assistant_msg` 校正最终内容与消息 ID。
 
 相关环境变量：
 
 - `VITE_API_BASE_URL`：默认 `/api/v1`
 
-代理配置在 `vite.config.ts` 的 `server.proxy` 中。
+代理配置在 `vite.config.ts` 的 `server.proxy` 中（已关闭代理超时，避免 SSE 被提前断开）。
 
 ---
 
@@ -145,9 +162,8 @@ dev-smart-assistant-frontend/
 
 ## 八、后续可改进
 
-- 对接真实登录、流式对话、知识库上传接口  
-- 完善对话历史侧边栏与会话管理  
-- 知识库文档列表、解析状态、删除文档  
+- 知识库上传与文档解析状态完善  
+- 对话流支持「停止生成」按钮（AbortController 已预留）  
 - 管理后台增加团队管理、权限细化  
 - 补充单元测试与 E2E 测试  
 
