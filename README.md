@@ -79,7 +79,7 @@ npm run preview
 |------|------|--------|
 | `/login` | 登录页 | 输入账号密码进入系统 |
 | `/chat` | 对话主界面 | 我的对话列表、创建/删除/改标题、提问与流式回答 |
-| `/knowledge` | 知识库管理 | 查看知识库列表、新建、编辑、删除、按名称搜索 |
+| `/knowledge` | 知识库管理 | 知识库列表/新建/编辑/删除；管理文档（上传、分页、详情、删除） |
 | `/admin` | 管理后台 | 仅超级管理员可进，用户组织树与启停用账号 |
 
 默认打开 `/` 会自动跳到 `/chat`。未登录访问受保护页面会跳回登录页。
@@ -153,7 +153,18 @@ dev-smart-assistant-frontend/
 | POST | `/knowledge-bases/update` | 更新（`id` + `name`/`description`） |
 | POST | `/knowledge-bases/delete` | 删除（`id`） |
 
-前端页面：`/knowledge`，接口封装在 `src/api/knowledge.ts`。文档上传接口后端尚未提供，页面暂未开放上传入口。
+### 知识库文档（同一前缀）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/knowledge-bases/createDocuments` | 上传文档（`multipart`：`kb_id` + `file`） |
+| POST | `/knowledge-bases/pageDocuments` | 分页列表（`kb_id` / `page` / `pageSize` / `keyword`） |
+| POST | `/knowledge-bases/getDocumentById` | 详情（`document_id`） |
+| POST | `/knowledge-bases/deleteDocumentById` | 删除（`document_id`） |
+
+上传限制：`pdf` / `docx` / `md` / `txt`，单文件最大 20MB；上传成功返回 `{ id }`（HTTP 201）。
+
+前端页面：`/knowledge`，接口封装在 `src/api/knowledge.ts`。在知识库列表点「管理文档」可上传、分页查看、看详情、删除文档。
 
 ---
 
@@ -181,11 +192,17 @@ dev-smart-assistant-frontend/
 2. 知识库按「当前团队」隔离，切换团队后列表会不同  
 3. 点击「新建知识库」创建一条后再刷新列表  
 
+### Q6：文档上传失败？
+
+1. 确认文件格式为 pdf / docx / md / txt，且不超过 20MB  
+2. 确认后端已启动，并已登录拿到 Token  
+3. 上传接口超时时间为 120 秒；网络慢时可稍等后再试  
+
 ---
 
 ## 八、后续可改进
 
-- 知识库文档上传、解析状态与「管理文档」页  
+- 文档解析状态自动刷新（轮询 pending/processing → ready）  
 - 对话流支持「停止生成」按钮（AbortController 已预留）  
 - 管理后台增加团队管理、权限细化  
 - 补充单元测试与 E2E 测试  
